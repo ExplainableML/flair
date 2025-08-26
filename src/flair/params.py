@@ -877,6 +877,42 @@ def parse_args(args):
         help="Indicating whether the model is using text conditioning or not. Must be specified if using text-conditioned models."
     )
     parser.add_argument(
+        "--visualize-patchwise-sim",
+        default=False,
+        action='store_true',
+        help="If true, we visualize the patch-wise similarity",
+    )
+    parser.add_argument(
+        "--visualize-attn-maps",
+        default=False,
+        action='store_true',
+        help="If true, we visualize the attention maps",
+    )
+    parser.add_argument(
+        "--vis-input-image-path",
+        type=str,
+        default=None,
+        help="Input image path to create the attention or token similarity visualization",
+    )
+    parser.add_argument(
+        "--vis-output-dir",
+        type=str,
+        default=None,
+        help="Output directory that stores all the visualizations",
+    )
+    parser.add_argument(
+        "--vis-input-text",
+        type=str,
+        default=None,
+        help="Input Texts for attention or similarity visualization. If multiple texts, each should be splitted by comma.",
+    )
+    parser.add_argument(
+        "--vis-prefix",
+        type=str,
+        default=None,
+        help="A lovely prefix you can choose to distibuish between different attention maps from different images.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=0, help="Default random seed."
     )
     parser.add_argument(
@@ -970,6 +1006,7 @@ def parse_args(args):
         action="store_true",
         help='If same row, the use a different Text-conditioned SigLIP loss, it also means that you are using a different model.'
     )
+
 
     args = parser.parse_args(args)
 
