@@ -225,6 +225,12 @@ def parse_args(args):
         help="K texts per image to keep when --inference-with-flair-topk is enabled."
     )
     parser.add_argument(
+        "--direct-global-matching",
+        default=False,
+        action="store_true",
+        help="If set to true, even in FLAIR, we directly match the global image and text features to do the retrieval (Original CLIP's way)"
+    )
+    parser.add_argument(
         "--fixed-merged-num",
         default=False,
         action="store_true",

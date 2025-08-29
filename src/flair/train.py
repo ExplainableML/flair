@@ -517,15 +517,12 @@ def compute_retrieval_topk(similarity_scores, txt2img, img2txt, topk_indices, nu
     similarity_scores: Tensor (M, K)      — per-image scores for the selected K texts
     topk_indices:      LongTensor (M, K)  — original global text indices for those K
     """
-    # Fill with a very small value so non-topk entries don't get picked.
     i2t_similarity_score = torch.full(
         (num_images, num_texts), -1e10,
         device=similarity_scores.device, dtype=similarity_scores.dtype
     )
     for i in range(num_images):
         i2t_similarity_score[i, topk_indices[i]] = similarity_scores[i]
-
-    # Reuse the standard retrieval metrics implementation.
     return compute_retrieval(i2t_similarity_score, txt2img, img2txt)
 
 
@@ -538,8 +535,6 @@ def retrieval_on_split(keyword, model, txt_loader, img_loader, img2txt_dict, txt
     all_img_ids, all_cap_ids = [], []
 
     with torch.no_grad():
-        # first loop over the text dataloader to store all text embeddings
-        #for i, batch in tqdm(enumerate(txt_loader), total=len(txt_loader), desc="Processing Texts"):
         for i, batch in enumerate(txt_loader):
             texts, cap_id = batch
             texts = texts.to(device=device, non_blocking=True)
@@ -549,34 +544,46 @@ def retrieval_on_split(keyword, model, txt_loader, img_loader, img2txt_dict, txt
                     global_text_token, local_text_tokens = unwrap_model(model).text_post(
                         global_text_token), unwrap_model(model).text_post(local_text_tokens)
                     text_features = F.normalize(global_text_token, dim=-1)
-                    all_text_tokens.append(global_text_token.squeeze(1))  # GPU
-                    all_local_text_tokens.append(local_text_tokens)  # GPU
+                    all_text_tokens.append(global_text_token.squeeze(1))
+                    all_local_text_tokens.append(local_text_tokens)
+                elif hasattr(args, "inference_with_flair_topk") and args.inference_with_flair_topk:
+                    global_text_token, local_text_tokens = unwrap_model(model).encode_text(texts, normalize=False)
+                    global_text_token, local_text_tokens = unwrap_model(model).text_post(
+                        global_text_token), unwrap_model(model).text_post(local_text_tokens)
+                    text_features = F.normalize(global_text_token, dim=-1)
+                    all_text_tokens.append(global_text_token.squeeze(1))
+                    all_local_text_tokens.append(local_text_tokens)
+                elif hasattr(args, "direct_global_matching") and args.direct_global_matching:
+                    global_text_token, _ = unwrap_model(model).encode_text(texts, normalize=False)
+                    global_text_token = unwrap_model(model).text_post(global_text_token)
+                    text_features = F.normalize(global_text_token, dim=-1)
                 else:
                     text_features = unwrap_model(model).encode_text(texts, normalize=True)
 
-                all_text_features.append(text_features.detach().cpu())  # cpu list of N, each of shape (B, D)
+                all_text_features.append(text_features.detach().cpu())
                 all_cap_ids.append(cap_id.detach().cpu())
-        all_text_features_tensor = torch.cat(all_text_features)  # (N, 512)
+        all_text_features_tensor = torch.cat(all_text_features)
         cap_ids = torch.cat(all_cap_ids)
 
-        
         if args.inference_with_flair:
             mode = "inference_with_flair"
-            all_text_tokens_tensor = torch.cat(all_text_tokens)  # on GPU
-            all_local_text_tokens_tensor = torch.cat(all_local_text_tokens)
-
+            all_text_tokens_tensor = torch.cat(all_text_tokens)
             similarity_scores, img_ids = compute_similarity_scores_attn_pool(
                 model, img_loader, all_text_features_tensor, all_text_tokens_tensor, device, input_dtype, autocast, mode
             )
-        elif args.inference_with_flair_topk:
+        elif hasattr(args, "inference_with_flair_topk") and args.inference_with_flair_topk:
             mode = "inference_with_flair_topk"
             top_k = int(args.topk)
-            all_text_tokens_tensor = torch.cat(all_text_tokens)  # GPU
-            all_local_text_tokens_tensor = torch.cat(all_local_text_tokens)
-
+            all_text_tokens_tensor = torch.cat(all_text_tokens)
             similarity_scores, img_ids, topk_i2t_ids = compute_similarity_scores_attn_pool(
                 model, img_loader, all_text_features_tensor, all_text_tokens_tensor,
                 device, input_dtype, autocast, mode, top_k=top_k
+            )
+        elif hasattr(args, "direct_global_matching") and args.direct_global_matching:
+            mode = "direct_global_matching"
+            similarity_scores, img_ids = compute_similarity_scores_attn_pool(
+                model, img_loader, all_text_features_tensor, torch.empty(0, device=device),
+                device, input_dtype, autocast, mode
             )
         else:
             similarity_scores, img_ids = compute_similarity_scores_original_clip(model, img_loader,
@@ -587,19 +594,19 @@ def retrieval_on_split(keyword, model, txt_loader, img_loader, img2txt_dict, txt
         new_img2txt_dict, new_txt2img_dict = remap_indices(merged_img_ids=img_ids, cap_ids=cap_ids,
                                                            img2txt_dict=img2txt_dict, txt2img_dict=txt2img_dict)
 
-        if args.inference_with_flair_topk:
+        if hasattr(args, "inference_with_flair_topk") and args.inference_with_flair_topk:
             retrieval_metrics = compute_retrieval_topk(
-                similarity_scores=similarity_scores,            # [M, K]
+                similarity_scores=similarity_scores,
                 txt2img=new_txt2img_dict,
                 img2txt=new_img2txt_dict,
-                topk_indices=topk_i2t_ids,                      # [M, K]
+                topk_indices=topk_i2t_ids,
                 num_images=num_img_samples,
                 num_texts=num_txt_samples
             )
         else:
             retrieval_metrics = compute_retrieval(similarity_scores=similarity_scores,
-                                                txt2img=new_txt2img_dict,
-                                                img2txt=new_img2txt_dict)
+                                                  txt2img=new_txt2img_dict,
+                                                  img2txt=new_img2txt_dict)
 
         if keyword != '':
             temp_retrieval_metrics = {}
@@ -608,7 +615,7 @@ def retrieval_on_split(keyword, model, txt_loader, img_loader, img2txt_dict, txt
                 temp_retrieval_metrics[keyword + k] = v
             retrieval_metrics = temp_retrieval_metrics
 
-        if "epoch" in metrics:  # we only need one epoch information
+        if "epoch" in metrics:
             metrics.update(
                 {**retrieval_metrics,
                  f"{keyword}num_text_samples": num_txt_samples,
@@ -658,7 +665,7 @@ def compute_similarity_scores_original_clip(model, img_loader, all_text_features
 
 def compute_similarity_scores_attn_pool(model, img_loader, all_text_features_tensor, all_text_tokens_tensor, device,
                                         input_dtype,
-                                        autocast, mode, topk: int = 0):
+                                        autocast, mode, top_k: int = 0):
     logits_per_image_list = []
     all_img_ids = []
     all_topk_ids = []
@@ -670,7 +677,7 @@ def compute_similarity_scores_attn_pool(model, img_loader, all_text_features_ten
         with autocast():
             if mode == 'inference_with_flair':
                 _, image_embeddings = unwrap_model(model).encode_image(images, normalize=False)
-                image_embeddings = unwrap_model(model).image_post(image_embeddings)  # down proj to 256
+                image_embeddings = unwrap_model(model).image_post(image_embeddings)
                 img_features_after_conditioning = unwrap_model(model).visual_proj(
                     all_text_tokens_tensor.unsqueeze(0),
                     image_embeddings,
@@ -679,70 +686,58 @@ def compute_similarity_scores_attn_pool(model, img_loader, all_text_features_ten
                 img_features_after_conditioning = F.normalize(img_features_after_conditioning, dim=-1).detach().cpu()
                 embed_dim = img_features_after_conditioning.shape[-1]
                 img_features_after_conditioning = img_features_after_conditioning.contiguous().view(-1, embed_dim)
+                logit_scale = unwrap_model(model).logit_scale.exp()
+                logits_per_image = (logit_scale.cpu() * torch.einsum('ij,ij->i',
+                                   img_features_after_conditioning, all_text_features_tensor)).unsqueeze(0).detach().cpu()
             elif mode == 'inference_with_flair_topk':
                 global_image_embeddings, image_embeddings = unwrap_model(model).encode_image(images, normalize=False)
-
-                global_image_embeddings = unwrap_model(model).image_post(global_image_embeddings)  # [B, 1, D']
-                image_embeddings = unwrap_model(model).image_post(image_embeddings)                # [B, L, D']
-                global_image_embeddings = F.normalize(global_image_embeddings, dim=-1)  # [B, 1, D']
-
+                global_image_embeddings = unwrap_model(model).image_post(global_image_embeddings)
+                image_embeddings = unwrap_model(model).image_post(image_embeddings)
+                global_image_embeddings = F.normalize(global_image_embeddings, dim=-1)
 
                 per_image_logits = []
                 per_image_topk = []
+                g = global_image_embeddings.squeeze(1)
+                sim_g2t = g @ all_text_features_tensor.t().to(g.device)
 
-                # flatten batch dim for globals
-                g = global_image_embeddings  # [B, 1, D']
-                g = g.squeeze(1)            # [B, D']
-
-                # Pre-norm text features once on CPU already (they’re passed in)
-                # Compute global image -> ALL text sim, keep top-k text indices for each image
-                sim_g2t = g @ all_text_features_tensor.t().to(g.device)  # [B, N]
-
-                # For each image in the batch, pick top-k texts and condition only on them
+                logit_scale = unwrap_model(model).logit_scale.exp()
                 for b in range(sim_g2t.size(0)):
-                    topk_sim, topk_idx = sim_g2t[b].topk(k=top_k, dim=-1)  # [K]
-                    per_image_topk.append(topk_idx.detach().cpu().unsqueeze(0))  # [1, K]
+                    topk_sim, topk_idx = sim_g2t[b].topk(k=top_k, dim=-1)
+                    per_image_topk.append(topk_idx.detach().cpu().unsqueeze(0))
 
-                    # Slice the top-k text tokens/features
-                    topk_text_tokens = all_text_tokens_tensor[topk_idx].to(image_embeddings.device)  # [K, D']
-                    topk_text_features = all_text_features_tensor[topk_idx].to(image_embeddings.device)  # [K, D]
+                    topk_text_tokens = all_text_tokens_tensor[topk_idx].to(image_embeddings.device)
+                    topk_text_features = all_text_features_tensor[topk_idx].to(image_embeddings.device)
 
-                    # Condition local image tokens on the top-k texts -> [1, K, D']
                     img_feat_k = unwrap_model(model).visual_proj(
-                        topk_text_tokens.unsqueeze(0),  # [1, K, D']
-                        image_embeddings[b:b+1],         # [1, L, D']
-                        image_embeddings[b:b+1]          # [1, L, D']
-                    )
-                    img_feat_k = F.normalize(img_feat_k, dim=-1).squeeze(0)  # [K, D']
+                        topk_text_tokens.unsqueeze(0),
+                        image_embeddings[b:b+1],
+                        image_embeddings[b:b+1]
+                    ).squeeze(0)
+                    img_feat_k = F.normalize(img_feat_k, dim=-1)
 
-                    # now, 'logits per image should be of shape (K, )
-                    # should not worry about the normalization since it's already done in text_features_tensor
-                    logit_scale = unwrap_model(model).logit_scale.exp()
-                    logits_k = (logit_scale * torch.einsum('ij,ij->i', img_feat_k, topk_text_features)).unsqueeze(0)  # [1, K]
+                    logits_k = (logit_scale * torch.einsum('ij,ij->i', img_feat_k, topk_text_features)).unsqueeze(0)
                     per_image_logits.append(logits_k.detach().cpu())
 
-                # stack batch results
-                logits_per_image = torch.cat(per_image_logits, dim=0)  # [B, K]
-                topk_idx_batch = torch.cat(per_image_topk, dim=0)      # [B, K]
+                logits_per_image = torch.cat(per_image_logits, dim=0)
+                topk_idx_batch = torch.cat(per_image_topk, dim=0)
                 all_topk_ids.append(topk_idx_batch)
+            elif mode == 'direct_global_matching':
+                g_img, _ = unwrap_model(model).encode_image(images, normalize=False)
+                g_img = unwrap_model(model).image_post(g_img).squeeze(1)
+                g_img = F.normalize(g_img, dim=-1)
+                sim = g_img @ all_text_features_tensor.to(g_img.device).t()
+                logit_scale = unwrap_model(model).logit_scale.exp()
+                logits_per_image = (logit_scale * sim).detach().cpu()
             else:
-                embed_dim = all_text_features_tensor.shape[-1]
-                img_features_after_conditioning = unwrap_model(model).visual_proj(
-                    all_text_tokens_tensor.unsqueeze(0),
-                    image_embeddings,
-                    image_embeddings
-                ).detach().cpu().contiguous().view(-1, embed_dim)
+                raise ValueError(f"Unknown mode: {mode}")
 
-            logit_scale = unwrap_model(model).logit_scale.exp()
-            logits_per_image = (logit_scale.cpu() * torch.einsum('ij,ij->i', img_features_after_conditioning,
-                                                                 all_text_features_tensor)).unsqueeze(0).detach().cpu()
         logits_per_image_list.append(logits_per_image)
 
-    img_ids = torch.cat(all_img_ids)  # shape (M)
-    similarity_scores = torch.cat(logits_per_image_list)  # shape (M, N)
+    img_ids = torch.cat(all_img_ids)
+    similarity_scores = torch.cat(logits_per_image_list)
 
     if mode == 'inference_with_flair_topk':
-        topk_ids = torch.cat(all_topk_ids)                    
+        topk_ids = torch.cat(all_topk_ids)
         return similarity_scores, img_ids, topk_ids
     else:
         return similarity_scores, img_ids
