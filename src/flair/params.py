@@ -213,6 +213,18 @@ def parse_args(args):
         help="If set to true, then we use FLAIR way of inference."
     )
     parser.add_argument(
+        "--inference-with-flair-topk",
+        default=False,
+        action="store_true",
+        help="If set to true, we use global matching to get the top-k similarity texts for one image, then we use FLAIR's way to re-rank the features."
+    )
+    parser.add_argument(
+        "--topk",
+        type=int,
+        default=128,
+        help="K texts per image to keep when --inference-with-flair-topk is enabled."
+    )
+    parser.add_argument(
         "--fixed-merged-num",
         default=False,
         action="store_true",
