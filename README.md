@@ -84,6 +84,12 @@ To reproduce the retrieval results in the FLAIR paper, we provide an example inf
 - `--precision`: Fixed as `amp` in our paper.
 - `--workers`: Adjustable according to your system.
 
+The default `src/inference.sh` generate all text-conditioned image features for all the texts in the datatsets, which could result in longer inference time than the base CLIP model. To accelerate the inference, FLAIR also support top-k retrieval mode: For each image, FLAIR first uses global image-text matching to get the top-k texts, then uses text-conditioned attention pooling to generate conditioned image features ONLY among these top-k pairs. To use this mode for inference, please run `src/inference_topk.sh` with these flags:
+
+- `--inference-with-flair-topk`: Enable this flag when using the FLAIR model in the top-k mode.
+- `--topk`: it's recommended to set its value to be `128` or `256`.
+
+
 ### Retrieval Tasks
 Enable the following flags in `src/inference.sh` for different retrieval tasks:
 
