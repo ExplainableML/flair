@@ -89,6 +89,9 @@ The default `src/inference.sh` generate all text-conditioned image features for 
 - `--inference-with-flair-topk`: Enable this flag when using the FLAIR model in the top-k mode.
 - `--topk`: it's recommended to set its value to be `128` or `256`.
 
+FALIR also supports retrieval in the original CLIP's way by only matching the global image and text token. To use this mode for inference, please run `src/inference_global.sh` with the following flag. But please note that we did not use global matching to produce the results in our paper.
+
+- `--direct-global-matching`: Enable this flag when using the FLAIR model in the global matching mode.
 
 ### Retrieval Tasks
 Enable the following flags in `src/inference.sh` for different retrieval tasks:
