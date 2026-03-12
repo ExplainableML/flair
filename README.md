@@ -166,7 +166,7 @@ If you find our work useful, please star this repo and cite:
 @inproceedings{xiao2025flair,
   title={FLAIR: VLM with Fine-grained Language-informed Image Representations},
   author={Xiao, Rui and Kim, Sanghwan and Georgescu, Mariana-Iuliana and Akata, Zeynep and Alaniz, Stephan},
-  journal={CVPR},
+  booktitle={CVPR},
   year={2025}
 }
 ```
